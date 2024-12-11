@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Audio to Text Transcription</title>
+
+    <!-- Bootstrap 5 -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap" rel="stylesheet">
+
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <!-- Custom CSS -->
+    <style>
+        body {
+            font-family: 'Roboto', sans-serif;
+            background: linear-gradient(135deg, #1f2937, #4b5563);
+            color: #fff;
+            margin: 0;
+            padding: 0;
+        }
+
+        .container {
+            margin-top: 80px;
+            max-width: 600px;
+            text-align: center;
+        }
+
+        .title {
+            font-size: 2.5rem;
+            font-weight: bold;
+            margin-bottom: 10px;
+            color: #f3f4f6;
+        }
+
+        .subtitle {
+            font-size: 1.1rem;
+            margin-bottom: 30px;
+            color: #d1d5db;
+        }
+
+        .button-box button {
+            margin: 10px;
+            padding: 10px 20px;
+            border-radius: 30px;
+            font-size: 1rem;
+            font-weight: 500;
+            transition: all 0.3s ease;
+        }
+
+        .button-box button:hover {
+            transform: scale(1.05);
+        }
+
+        #result-box {
+            background: #f3f4f6;
+            color: #1f2937;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
+            margin-top: 30px;
+        }
+
+        #loading {
+            display: none;
+            margin-top: 20px;
+        }
+
+        .loading-text {
+            font-size: 1.2rem;
+            color: #9ca3af;
+            margin-bottom: 10px;
+        }
+
+        .progress {
+            height: 10px;
+        }
+
+        .footer {
+            margin-top: 50px;
+            font-size: 0.9rem;
+            color: #9ca3af;
+        }
+
+        .footer a {
+            color: #9ca3af;
+            text-decoration: none;
+        }
+
+        .footer a:hover {
+            text-decoration: underline;
+        }
+
+        #nerEntities {
+            list-style-position: outside;
+            margin: 0;
+            padding-left: 1.5em;
+        }
+
+        #nerEntities li {
+            text-indent: -0.5em;
+            padding-left: 0.5em;
+            line-height: 1.5;
+        }
+
+        #sentimentChartContainer {
+            margin-top: 20px;
+            display: flex;
+            justify-content: center;
+        }
+
+        #sentimentChart {
+            width: 200px; /* Adjust width for smaller size */
+            height: 200px; /* Adjust height for smaller size */
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 class="title">Audio to Text Transcription</h1>
+        <p class="subtitle">Convert your audio recordings to text in just a few clicks!</p>
+
+        <!-- Buttons for controlling recording -->
+        <div class="button-box">
+            <button id="startRecordBtn" class="btn btn-primary">Start Recording</button>
+            <button id="stopRecordBtn" class="btn btn-danger d-none">Stop Recording</button>
+        </div>
+
+        <!-- Audio transcription result -->
+        <div id="result-box" class="d-none">
+            <h5>Original Transcription:</h5>
+            <p id="transcriptionText" class="text-muted">Your transcribed text will appear here...</p>
+            <hr>
+            <h5>Preprocessed Text:</h5>
+            <p id="preprocessedText" class="text-muted">Your preprocessed text will appear here...</p>
+            <hr>
+            <h5>Named Entities:</h5>
+            <ul id="nerEntities" class="text-muted">
+                <!-- Recognized entities will be displayed here -->
+            </ul>
+            <hr>
+            <h5>Sentiment Analysis:</h5>
+            <div id="sentimentChartContainer">
+                <canvas id="sentimentChart"></canvas>
+            </div>
+            <hr>
+            <!-- New Section for Summary -->
+            <h5>Summary:</h5>
+            <p id="summaryText" class="text-muted">Your summary will appear here...</p>
+            <hr>
+            <!-- New Section for Generated Text -->
+            <h5>Generated Text:</h5>
+            <p id="generatedText" class="text-muted">Your generated text will appear here...</p>
+
+            <!-- Start New Recording button -->
+            <button id="startNewRecordingBtn" class="btn btn-secondary mt-3">Start New Recording</button>
+        </div>
+
+        <!-- Loading Indicator -->
+        <div id="loading" class="loading">
+            <p class="loading-text">Processing your audio, please wait...</p>
+            <div class="progress">
+                <div class="progress-bar progress-bar-striped progress-bar-animated" style="width: 100%;"></div>
+            </div>
+        </div>
+
+        <p class="footer">
+            Powered by <a href="https://openai.com/whisper" target="_blank">Whisper</a>, <a href="https://www.nltk.org/" target="_blank">NLTK</a>, and <a href="https://spacy.io/" target="_blank">SpaCy</a>.
+        </p>
+    </div>
+
+ <script>
+    let mediaRecorder;
+    let audioChunks = [];
+
+    const startRecordBtn = document.getElementById('startRecordBtn');
+    const stopRecordBtn = document.getElementById('stopRecordBtn');
+    const startNewRecordingBtn = document.getElementById('startNewRecordingBtn');
+    const transcriptionText = document.getElementById('transcriptionText');
+    const preprocessedText = document.getElementById('preprocessedText');
+    const nerEntities = document.getElementById('nerEntities');
+    const resultBox = document.getElementById('result-box');
+    const loading = document.getElementById('loading');
+
+    const sentimentChart = document.getElementById('sentimentChart');
+    let sentimentChartInstance;
+
+    async function renderSentimentChart(positivePercentage, negativePercentage) {
+        if (sentimentChartInstance) {
+            sentimentChartInstance.destroy();
+        }
+
+        sentimentChartInstance = new Chart(sentimentChart, {
+            type: 'doughnut',
+            data: {
+                labels: ['Positive', 'Negative'],
+                datasets: [{
+                    label: 'Sentiment Analysis',
+                    data: [positivePercentage, negativePercentage],
+                    backgroundColor: ['#4caf50', '#f44336'],
+                    borderColor: ['#388e3c', '#d32f2f'],
+                    borderWidth: 1,
+                }]
+            },
+            options: {
+                maintainAspectRatio: false, // Prevent chart from maintaining a fixed aspect ratio
+                plugins: {
+                    legend: {
+                        display: true,
+                        position: 'bottom',
+                    }
+                }
+            }
+        });
+    }
+
+    // Start Recording
+    startRecordBtn.addEventListener('click', async () => {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        mediaRecorder = new MediaRecorder(stream);
+        audioChunks = [];
+        mediaRecorder.start();
+
+        mediaRecorder.ondataavailable = (event) => {
+            audioChunks.push(event.data);
+        };
+
+        mediaRecorder.onstop = async () => {
+            const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
+            await transcribeAudio(audioBlob);
+        };
+
+        startRecordBtn.classList.add('d-none'); // Hide "Start Recording" button
+        stopRecordBtn.classList.remove('d-none'); // Show "Stop Recording" button
+    });
+
+    // Stop Recording
+    stopRecordBtn.addEventListener('click', () => {
+        mediaRecorder.stop();
+        stopRecordBtn.classList.add('d-none'); // Hide "Stop Recording" button
+    });
+
+    // Start New Recording
+    startNewRecordingBtn.addEventListener('click', () => {
+        resultBox.classList.add('d-none'); // Hide result box
+        startRecordBtn.classList.remove('d-none'); // Show "Start Recording" button
+        transcriptionText.textContent = "Your transcribed text will appear here...";
+        preprocessedText.textContent = "Your preprocessed text will appear here...";
+        nerEntities.innerHTML = "";
+    });
+
+    // Function to Transcribe Audio
+    async function transcribeAudio(audioBlob) {
+        loading.style.display = 'block'; // Show loading spinner
+
+        const formData = new FormData();
+        formData.append('audio', audioBlob);
+
+        try {
+            const response = await fetch('/transcribe', { // Send POST request to /transcribe
+                method: 'POST',
+                body: formData
+            });
+
+            const data = await response.json();
+
+            // Populate Transcription Data
+            transcriptionText.textContent = data.transcription || 'N/A';
+            preprocessedText.textContent = data.preprocessed_text || 'N/A';
+
+            // Populate Named Entities
+            nerEntities.innerHTML = "";
+            (data.named_entities || []).forEach(entity => {
+                const li = document.createElement('li');
+                li.textContent = `${entity.text} (${entity.label})`;
+                nerEntities.appendChild(li);
+            });
+
+            // Render Sentiment Chart
+            if (data.sentiment) {
+                renderSentimentChart(data.sentiment.positive_percentage, data.sentiment.negative_percentage);
+            }
+
+            // Add Summary and Generated Text
+            document.getElementById('summaryText').textContent = data.summary || 'N/A';
+            document.getElementById('generatedText').textContent = data.generated_text || 'N/A';
+
+            loading.style.display = 'none'; // Hide loading spinner
+            resultBox.classList.remove('d-none'); // Show result box
+
+        } catch (error) {
+            console.error("Error transcribing audio:", error);
+            loading.style.display = 'none';
+            alert("An error occurred during transcription.");
+        }
+    }
+</script>
+
+</body>
+</html>
